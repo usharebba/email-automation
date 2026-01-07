@@ -1,70 +1,66 @@
-from flask import Flask, render_template, request, redirect, flash
-import smtplib, os
+import streamlit as st
+import smtplib
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from werkzeug.utils import secure_filename
+from tempfile import NamedTemporaryFile
 
-app = Flask(__name__)
-app.secret_key = "supersecret"
-
-# 🔹 Configure your email account here
-SMTP_SERVER = "smtp.gmail.com"   # change for Outlook/SES/etc
+# ---------------- CONFIG ----------------
+SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 465
 EMAIL_ADDRESS = "ushasreechandrarebba@gmail.com"
-EMAIL_PASSWORD = "vyhu qulw ysaj znzr"   # for Gmail use App Password
+EMAIL_PASSWORD = "vyhu qulw ysaj znzr"   # ⚠️ move to secrets in production
 
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+# ---------------- UI ----------------
+st.set_page_config(page_title="Cold Email Sender", layout="centered")
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        to_email = request.form["to_email"]
-        subject = request.form["subject"]
-        body = request.form["body"]
-        file = request.files.get("resume")
+st.title("📧 Cold Emailing with Resume")
+st.write("Send professional emails with resume attachment")
 
+with st.form("email_form"):
+    to_email = st.text_input("Recipient Email")
+    subject = st.text_input("Subject")
+    body = st.text_area("Message Body", height=150)
+    resume = st.file_uploader("Upload Resume", type=["pdf", "doc", "docx"])
+    submit = st.form_submit_button("Send Email")
+
+# ---------------- LOGIC ----------------
+if submit:
+    if not to_email or not subject or not body:
+        st.warning("⚠️ Please fill all required fields")
+    else:
         try:
-            # setup email
             msg = MIMEMultipart()
             msg["From"] = EMAIL_ADDRESS
             msg["To"] = to_email
             msg["Subject"] = subject
             msg.attach(MIMEText(body, "plain"))
 
-            filepath = None
-            if file and file.filename:
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
-                file.save(filepath)
+            # handle attachment
+            if resume:
+                with NamedTemporaryFile(delete=False) as tmp:
+                    tmp.write(resume.read())
+                    tmp_path = tmp.name
 
-                with open(filepath, "rb") as f:
-                    mime = MIMEBase("application", "octet-stream")
-                    mime.set_payload(f.read())
-                    encoders.encode_base64(mime)
-                    mime.add_header("Content-Disposition", f"attachment; filename={filename}")
-                    msg.attach(mime)
+                with open(tmp_path, "rb") as f:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(f.read())
+                    encoders.encode_base64(part)
+                    part.add_header(
+                        "Content-Disposition",
+                        f"attachment; filename={resume.name}",
+                    )
+                    msg.attach(part)
 
-            # send email
+                os.remove(tmp_path)
+
             with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
                 server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
                 server.send_message(msg)
 
-            # cleanup
-            if filepath and os.path.exists(filepath):
-                os.remove(filepath)
-
-            flash("✅ Email sent successfully!", "success")
+            st.success("✅ Email sent successfully!")
 
         except Exception as e:
-            flash(f"❌ Failed to send email: {str(e)}", "danger")
-
-        return redirect("/")
-
-    return render_template("index.html")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+            st.error(f"❌ Failed to send email: {e}")
